@@ -10,6 +10,7 @@ import (
 
 	"github.com/babylonlabs-io/staking-queue-client/client"
 	"github.com/babylonlabs-io/staking-queue-client/config"
+	"github.com/babylonlabs-io/staking-queue-client/queuemngr"
 )
 
 const (
@@ -66,6 +67,54 @@ func TestPing(t *testing.T) {
 	require.Contains(t, err.Error(), "rabbitMQ connection is closed", "Error message should indicate which queue failed")
 }
 
+func TestSchemaVersionBackwardsCompatibility(t *testing.T) {
+	type oldActiveStakingEvent struct {
+		EventType             client.EventType `json:"event_type"`
+		StakingTxHashHex      string           `json:"staking_tx_hash_hex"`
+		StakerPkHex           string           `json:"staker_pk_hex"`
+		FinalityProviderPkHex string           `json:"finality_provider_pk_hex"`
+		StakingValue          uint64           `json:"staking_value"`
+		StakingStartHeight    uint64           `json:"staking_start_height"`
+		StakingStartTimestamp int64            `json:"staking_start_timestamp"`
+		StakingTimeLock       uint64           `json:"staking_timelock"`
+		StakingOutputIndex    uint64           `json:"staking_output_index"`
+		StakingTxHex          string           `json:"staking_tx_hex"`
+		IsOverflow            bool             `json:"is_overflow"`
+	}
+
+	event := &oldActiveStakingEvent{
+		EventType:             client.ActiveStakingEventType,
+		StakingTxHashHex:      "0x1234567890abcdef",
+		StakerPkHex:           "0x1234567890abcdef",
+		FinalityProviderPkHex: "0x1234567890abcdef",
+		StakingValue:          100,
+		StakingStartHeight:    100,
+		StakingStartTimestamp: 100,
+		StakingTimeLock:       100,
+		StakingOutputIndex:    100,
+		StakingTxHex:          "0x1234567890abcdef",
+		IsOverflow:            false,
+	}
+	queueCfg := config.DefaultQueueConfig()
+
+	testServer := setupTestQueueConsumer(t, queueCfg)
+	defer testServer.Stop(t)
+
+	queueManager := testServer.QueueManager
+	stakingEventReceivedChan, err := queueManager.StakingQueue.ReceiveMessages()
+	require.NoError(t, err)
+
+	err = queuemngr.PushEvent(queueManager, event)
+	require.NoError(t, err)
+	receivedEv := <-stakingEventReceivedChan
+	var stakingEv client.ActiveStakingEvent
+	err = json.Unmarshal([]byte(receivedEv.Body), &stakingEv)
+	require.NoError(t, err)
+	require.Equal(t, event.EventType, stakingEv.GetEventType())
+	require.Equal(t, event.StakingTxHashHex, stakingEv.GetStakingTxHashHex())
+	require.Equal(t, 0, stakingEv.SchemaVersion)
+}
+
 func TestStakingEvent(t *testing.T) {
 	numStakingEvents := 3
 	activeStakingEvents := buildActiveNStakingEvents(mockStakerHash, numStakingEvents)
@@ -88,6 +137,7 @@ func TestStakingEvent(t *testing.T) {
 		err := json.Unmarshal([]byte(receivedEv.Body), &stakingEv)
 		require.NoError(t, err)
 		require.Equal(t, ev, &stakingEv)
+		require.Equal(t, 0, stakingEv.SchemaVersion)
 	}
 }
 
@@ -113,6 +163,7 @@ func TestUnbondingEvent(t *testing.T) {
 		err := json.Unmarshal([]byte(receivedEv.Body), &unbondingEv)
 		require.NoError(t, err)
 		require.Equal(t, ev, &unbondingEv)
+		require.Equal(t, 0, unbondingEv.SchemaVersion)
 	}
 }
 
@@ -138,6 +189,7 @@ func TestWithdrawEvent(t *testing.T) {
 		err := json.Unmarshal([]byte(receivedEv.Body), &withdrawEv)
 		require.NoError(t, err)
 		require.Equal(t, ev, &withdrawEv)
+		require.Equal(t, 0, withdrawEv.SchemaVersion)
 	}
 }
 
@@ -163,6 +215,7 @@ func TestExpiryEvent(t *testing.T) {
 		err := json.Unmarshal([]byte(receivedEv.Body), &expiryEvent)
 		require.NoError(t, err)
 		require.Equal(t, ev, &expiryEvent)
+		require.Equal(t, 0, expiryEvent.SchemaVersion)
 	}
 }
 
@@ -188,6 +241,7 @@ func TestBtcInfoEvent(t *testing.T) {
 		err := json.Unmarshal([]byte(receivedEv.Body), &BtcInfoEvent)
 		require.NoError(t, err)
 		require.Equal(t, ev, &BtcInfoEvent)
+		require.Equal(t, 0, BtcInfoEvent.SchemaVersion)
 	}
 }
 
@@ -213,6 +267,7 @@ func TestConfirmedInfoEvent(t *testing.T) {
 		err := json.Unmarshal([]byte(receivedEv.Body), &confirmedInfoEvent)
 		require.NoError(t, err)
 		require.Equal(t, ev, &confirmedInfoEvent)
+		require.Equal(t, 0, confirmedInfoEvent.SchemaVersion)
 	}
 }
 
